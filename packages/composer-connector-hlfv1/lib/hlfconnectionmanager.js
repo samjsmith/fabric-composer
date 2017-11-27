@@ -56,6 +56,9 @@ const HLFConnection = require('./hlfconnection');
 const HLFWalletProxy = require('./hlfwalletproxy');
 const Wallet = require('composer-common').Wallet;
 
+
+const clientUtils = require('fabric-client/lib/utils.js');
+
 /**
  * Class representing a connection manager that establishes and manages
  * connections to one or more business networks running on Hyperledger Fabric,
@@ -66,10 +69,18 @@ class HLFConnectionManager extends ConnectionManager {
 
     /**
      * Create a new client.
+     * @param {object} cryptoOpts optional CryptoSuite options
      * @return {Client} A new client.
      */
-    static createClient() {
-        return new Client();
+    static createClient(cryptoOpts) {
+        const client = new Client();
+        // Example hard coded options
+        // const cryptoOpts = {software: false, lib: '/usr/local/lib/softhsm/libsofthsm2.so', slot: 0, pin: '98765432'};
+        if(cryptoOpts) {
+            const cryptoSuite = clientUtils.newCryptoSuite(cryptoOpts);
+            client.setCryptoSuite(cryptoSuite);
+        }
+        return client;
     }
 
     /**
@@ -286,7 +297,6 @@ class HLFConnectionManager extends ConnectionManager {
         } else {
             storePath = profileData.keyValStore;
         }
-
         return this._setupFileStore(client, storePath);
 
     }
@@ -325,9 +335,13 @@ class HLFConnectionManager extends ConnectionManager {
         LOG.entry(method, client, keyValStorePath);
         return Client.newDefaultKeyValueStore({path: keyValStorePath}).then((store) => {
             client.setStateStore(store);
-            const cryptoSuite = Client.newCryptoSuite();
-            cryptoSuite.setCryptoKeyStore(Client.newCryptoKeyStore({path: keyValStorePath}));
-            client.setCryptoSuite(cryptoSuite);
+
+            const existingCryptoSuite = client.getCryptoSuite();
+            if(!existingCryptoSuite) {
+                const cryptoSuite = Client.newCryptoSuite();
+                cryptoSuite.setCryptoKeyStore(Client.newCryptoKeyStore({path: keyValStorePath}));
+                client.setCryptoSuite(cryptoSuite);
+            }
             return store;
         })
         .catch((error) => {
@@ -391,22 +405,23 @@ class HLFConnectionManager extends ConnectionManager {
     /**
      * Import an identity into a profile wallet or keystore
      *
-     * @param {string} connectionProfile The name of the connection profile
-     * @param {object} connectionOptions The connection options loaded from the profile
+     * @param {string} connectionProfileName The name of the connection profile
+     * @param {object} connectionProfileData The connection options loaded from the profile
      * @param {string} id the id to associate with the identity
      * @param {string} publicCert the public signer certificate
      * @param {string} privateKey the private key
      * @returns {Promise} a promise
      */
-    importIdentity(connectionProfile, connectionOptions, id, publicCert, privateKey) {
+    importIdentity(connectionProfileName, connectionProfileData, id, publicCert, privateKey) {
         const method = 'importIdentity';
-        LOG.entry(method, connectionProfile, connectionOptions, id, publicCert);
+
+        LOG.entry(method, connectionProfileName, connectionProfileData, id, publicCert, privateKey);
 
         // validate arguments
-        if (!connectionProfile || typeof connectionProfile !== 'string') {
-            return Promise.reject(Error('connectionProfile not specified or not a string'));
-        } else if (!connectionOptions || typeof connectionOptions !== 'object') {
-            return Promise.reject(new Error('connectionOptions not specified or not an object'));
+        if (!connectionProfileName || typeof connectionProfileName !== 'string') {
+            throw new Error('connectionProfileName not specified or not a string');
+        } else if (!connectionProfileData || typeof connectionProfileData !== 'object') {
+            throw new Error('connectionOptions not specified or not an object');
         } else if (!id || typeof id !== 'string') {
             return Promise.reject(new Error('id not specified or not a string'));
         } else if (!publicCert || typeof publicCert !== 'string') {
@@ -416,18 +431,21 @@ class HLFConnectionManager extends ConnectionManager {
         }
 
         //default the optional wallet
-        let wallet = connectionOptions.wallet || Wallet.getWallet();
+        let wallet = connectionProfileData.wallet || Wallet.getWallet();
 
         // validate the profile
         try {
-            this.validateProfileDefinition(connectionOptions, wallet);
+            this.validateProfileDefinition(connectionProfileData, wallet);
         } catch(error) {
             return Promise.reject(error);
         }
 
-        let mspID = connectionOptions.mspID;
-        const client = HLFConnectionManager.createClient();
-        return this._setupClientStore(client, wallet, connectionOptions)
+        // setup crypto options
+        let cryptoOptions = connectionProfileData.cryptoOpt;
+
+        let mspID = connectionProfileData.mspID;
+        const client = HLFConnectionManager.createClient(cryptoOptions);
+        return this._setupClientStore(client, wallet, connectionProfileData)
             .then(() => {
                 return client.createUser({
                     username: id,
@@ -449,70 +467,65 @@ class HLFConnectionManager extends ConnectionManager {
 
     /**
      * Establish a connection to the business network.
-     * @param {string} connectionProfile The name of the connection profile
+     * @param {string} connectionProfileName The name of the connection profile
      * @param {string} businessNetworkIdentifier The identifier of the business network (no version!)
-     * @param {object} connectOptions The connection options loaded from the profile
+     * @param {object} connectionProfileData The connection options loaded from the profile
      * @return {Promise} A promise that is resolved with a {@link Connection}
      * object once the connection is established, or rejected with a connection error.
      */
-    connect(connectionProfile, businessNetworkIdentifier, connectOptions) {
+    connect(connectionProfileName, businessNetworkIdentifier, connectionProfileData) {
         const method = 'connect';
-        LOG.entry(method, connectionProfile, businessNetworkIdentifier, connectOptions);
+        LOG.entry(method, connectionProfileName, businessNetworkIdentifier, connectionProfileData);
 
         // Validate all the arguments.
-        if (!connectionProfile) {
-            return Promise.reject(new Error('connectionProfile not specified'));
-        } else if (!connectOptions) {
-            return Promise.reject(new Error('connectOptions not specified'));
+        if (!connectionProfileName) {
+            throw new Error('connectionProfile not specified');
+        } else if (!connectionProfileData) {
+            throw new Error('connectOptions not specified');
         }
 
         //default the optional wallet
-        let wallet = connectOptions.wallet || Wallet.getWallet();
+        let wallet = connectionProfileData.wallet || Wallet.getWallet();
 
         // validate the profile
-        try {
-            this.validateProfileDefinition(connectOptions, wallet);
-        } catch(error) {
-            return Promise.reject(error);
-        }
+        this.validateProfileDefinition(connectionProfileData, wallet);
 
         // Default the optional connection options.
-        if (!connectOptions.timeout) {
-            connectOptions.timeout = 180;
+        if (!connectionProfileData.timeout) {
+            connectionProfileData.timeout = 180;
         }
 
         // set the message limits if required
-        if (connectOptions.maxSendSize && connectOptions.maxSendSize !== 0) {
-            Client.setConfigSetting('grpc-max-send-message-length', connectOptions.maxSendSize * 1 < 0 ? -1 : 1024 * 1024 * connectOptions.maxSendSize);
+        if (connectionProfileData.maxSendSize && connectionProfileData.maxSendSize !== 0) {
+            Client.setConfigSetting('grpc-max-send-message-length', connectionProfileData.maxSendSize * 1 < 0 ? -1 : 1024 * 1024 * connectionProfileData.maxSendSize);
         }
 
         // set the message limits if required
-        if (connectOptions.maxRecvSize && connectOptions.maxRecvSize !== 0) {
-            Client.setConfigSetting('grpc-max-receive-message-length', connectOptions.maxRecvSize * 1 < 0 ? -1 : 1024 * 1024 * connectOptions.maxRecvSize);
+        if (connectionProfileData.maxRecvSize && connectionProfileData.maxRecvSize !== 0) {
+            Client.setConfigSetting('grpc-max-receive-message-length', connectionProfileData.maxRecvSize * 1 < 0 ? -1 : 1024 * 1024 * connectionProfileData.maxRecvSize);
         }
+
+        // setup crypto options
+        let cryptoOptions = connectionProfileData.cryptoOpt;
 
         // Create a new client instance.
-        const client = HLFConnectionManager.createClient();
+        const client = HLFConnectionManager.createClient(cryptoOptions);
 
         // Create a new channel instance.
-        const channel = client.newChannel(connectOptions.channel);
+        const channel = client.newChannel(connectionProfileData.channel);
 
         // Load all of the orderers into the client.
-        connectOptions.orderers.forEach((orderer) => {
+        connectionProfileData.orderers.forEach((orderer) => {
             LOG.debug(method, 'Adding orderer URL', orderer);
-            channel.addOrderer(HLFConnectionManager.parseOrderer(orderer, connectOptions.timeout, connectOptions.globalCert));
+            channel.addOrderer(HLFConnectionManager.parseOrderer(orderer, connectionProfileData.timeout, connectionProfileData.globalCert));
         });
 
         // Parse all of the peers.
         let peers = [];
         let eventHubDefs = [];
-        try {
-            connectOptions.peers.forEach((peer) => {
-                HLFConnectionManager.parsePeer(peer, connectOptions.timeout, connectOptions.globalCert, peers, eventHubDefs);
-            });
-        } catch(error) {
-            return Promise.reject(error);
-        }
+        connectionProfileData.peers.forEach((peer) => {
+            HLFConnectionManager.parsePeer(peer, connectionProfileData.timeout, connectionProfileData.globalCert, peers, eventHubDefs);
+        });
 
         // Check for at least one peer and at least one event hub.
         if (peers.length === 0) {
@@ -528,14 +541,14 @@ class HLFConnectionManager extends ConnectionManager {
         });
 
         // Set up the wallet.
-        return this._setupClientStore(client, wallet, connectOptions)
+        return this._setupClientStore(client, wallet, connectionProfileData)
             .then(() => {
 
                 // Create a CA client.
-                const caClient = HLFConnectionManager.parseCA(connectOptions.ca, client.getCryptoSuite());
+                const caClient = HLFConnectionManager.parseCA(connectionProfileData.ca, client.getCryptoSuite());
 
                 // Now we can create the connection.
-                let connection = new HLFConnection(this, connectionProfile, businessNetworkIdentifier, connectOptions, client, channel, eventHubDefs, caClient);
+                let connection = new HLFConnection(this, connectionProfileName, businessNetworkIdentifier, connectionProfileData, client, channel, eventHubDefs, caClient);
                 LOG.exit(method, connection);
                 return connection;
 
@@ -549,16 +562,18 @@ class HLFConnectionManager extends ConnectionManager {
     /**
      * Obtain the credentials associated with a given identity.
      * @param {String} connectionProfileName - Name of the connection profile.
-     * @param {Object} connectionOptions - connection options loaded from the profile.
+     * @param {Object} connectionProfileData - connection options loaded from the profile.
      * @param {String} id - Name of the identity.
      * @return {Promise} Resolves to credentials in the form <em>{ certificate: String, privateKey: String }</em>, or
      * {@link null} if the named identity does not exist.
      */
-    exportIdentity(connectionProfileName, connectionOptions, id) {
+    exportIdentity(connectionProfileName, connectionProfileData, id) {
         const method = 'exportIdentity';
-        LOG.entry(method, connectionProfileName, connectionOptions, id);
-        const client = HLFConnectionManager.createClient();
-        return this._setupClientStore(client, connectionOptions.wallet, connectionOptions)
+        LOG.entry(method, connectionProfileName, connectionProfileData, id);
+        // setup crypto options
+        let cryptoOptions = connectionProfileData.cryptoOpt;
+        const client = HLFConnectionManager.createClient(cryptoOptions);
+        return this._setupClientStore(client, connectionProfileData.wallet, connectionProfileData)
             .then(() => {
                 return client.getUserContext(id, true);
             })
