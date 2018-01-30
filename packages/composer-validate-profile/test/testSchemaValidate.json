@@ -1,0 +1,107 @@
+'use strict';
+const Ajv = require('ajv');
+const schema = { 
+    "$schema" : "http://json-schema.org/schema#",
+    "id" : "http://hyperledger.org/projects/composer/schemas/cccp.json",
+    "definitions" : {
+        "client" : {
+            "type" : "object"
+        },
+        "certificateAuthorities" : {
+            "type" : "object"
+        },
+        "channels" : {
+            "type" : "object"
+        },
+        "orderers" : {
+            "type" : "object"
+        },
+        "organizations" : {
+            "type" : "object"
+        }, 
+        "peers" : {
+            "type" : "object"
+        }
+    },
+    "type" : "object",
+    "properties" : {
+        "name" : { "type" : "string" },
+        "x-type" : { "enum" : [ "hlfv1", "hlfv11" ] },
+        "client" : { "$ref" : "#/definitions/client" },
+        "certificateAuthorities" : { "$ref": "#/definitions/certificateAuthorities" },
+        "channels" : { "$ref" : "#/definitions/channels" },
+        "orderers" : { "$ref" : "#/definitions/orderers" },
+        "organizations" : { "$ref" : "#/definitions/organizations" },
+        "peers" : { "$ref":  "#/definitions/peers" }
+    },
+    "required" : ["name", "x-type", "client", "certificateAuthorities", "channels", "orderers", "peers"] 
+
+}
+
+const data = {
+    "name": "hlfv1",
+    "version": "1.0.0",
+    "x-commitTimeout": 300,
+    "x-type": "hlfv12",
+    "client": {
+        "organization": "Org1",
+        "connection": {
+            "timeout": {
+                "orderer": "300",
+                "peer": {
+                    "endorser": "300",
+                    "eventHub": "300",
+                    "eventReg": "300"
+                }
+            }
+        }
+    },
+    "certificateAuthorities": {
+        "ca.org1.example.com": {
+            "caName": "ca.org1.example.com",
+            "url": "http://localhost:7054"
+        }
+    },
+    "channels": {
+        "composerchannel": {
+            "orderers": [
+                "orderer.example.com"
+            ],
+            "peers": {
+                "peer0.org1.example.com": {}
+            }
+        }
+    },
+    "orderers": {
+        "orderer.example.com": {
+            "url": "grpc://localhost:7050"
+        }
+    },
+    "organizations": {
+        "Org1": {
+            "certificateAuthorities": [
+                "ca.org1.example.com"
+            ],
+            "mspid": "Org1MSP",
+            "peers": [
+                "peer0.org1.example.com"
+            ]
+        }
+    },
+    "peers": {
+        "peer0.org1.example.com": {
+            "eventUrl": "grpc://localhost:7053",
+            "url": "grpc://localhost:7051"
+        }
+    }
+}
+let ajv = new Ajv();
+let validate = ajv.compile(schema);
+console.log(validate(data)); 
+if(validate.errors) {
+    validate.errors.forEach(err => {
+        if(err.params.allowedValues) {
+            console.log(err.dataPath+' '+err.message+' '+err.params.allowedValues);
+        }
+    });
+}

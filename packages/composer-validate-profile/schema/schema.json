@@ -1,0 +1,101 @@
+{ 
+    "$schema" : "http://json-schema.org/schema#",
+    "definitions" : {
+        "client" : {
+            "type" : "object",
+            "properties" : {
+                "organization" : { "type" : "string" } 
+            },
+            "required" : [ "organization" ]
+        },
+        "certificateAuthorities" : {
+            "type" : "object",
+            "patternProperties": {
+                "^.*$" : { "$ref": "#/definitions/certificateAuthority" }
+            }
+        },
+        "certificateAuthority" : {
+            "type" : "object",
+            "properties": {
+                "caName" : { "type" : "string" },
+                "url" : { "format" : "uri" }
+            }
+        },
+        "channels" : {
+            "type" : "object",
+            "patternProperties" : {
+                "^.*$" : { "$ref": "#/definitions/channel" }
+            },
+            "minimum" : 1
+        },
+        "channel" : {
+            "type" : "object",
+            "properties" : {
+                "orderers" : { "type" : "array" },
+                "peers" : { "$ref" : "#/definitions/channel-peer" }
+            }
+        },
+        "channel-peer" : {
+            "type" : "object",
+            "patternProperties": {
+                "^.*$" : { }                
+            },
+            "minimum" : 1
+        },
+        "orderers" : {
+            "type" : "object",
+            "patternProperties": {
+                "^.*$" : { "$ref": "#/definitions/orderer" } 
+            },
+            "minimum": 1
+        },
+        "orderer" : {
+            "type" : "object",
+            "properties" : {
+                "url" : { "format" : "uri" }
+            },
+            "required": [ "url" ]
+        },
+        "organizations" : {
+            "type" : "object",
+            "patternProperties": {
+                "^.*$" : { "$ref": "#/definitions/organization" } 
+            },
+            "minimum": 1
+        }, 
+        "organization" : {
+            "type" : "object",
+            "properties": {
+                "certificateAuthorities" : { "type" : "array" },
+                "mspid" : { "type" : "string" },
+                "peers" : { "type" : "array" }
+            },
+            "required": [ "mspid", "peers" ]
+        },
+        "peers" : {
+            "type" : "object",
+            "patternProperties": {
+                "^.*$" : { "$ref": "#/definitions/peer" } 
+            },
+            "minimum": 1
+        },
+        "peer" : {
+            "type" : "object", 
+            "eventUrl" : { "format" : "uri" },
+            "url" : { "format" : "uri" }
+        }
+    },
+    "type" : "object",
+    "properties" : {
+        "name" : { "type" : "string", "pattern" : "^[a-z0-9]+$" },
+        "x-type" : { "enum" : [ "hlfv1", "hlfv11" ] },
+        "client" : { "$ref" : "#/definitions/client" },
+        "certificateAuthorities" : { "$ref": "#/definitions/certificateAuthorities" },
+        "channels" : { "$ref" : "#/definitions/channels" },
+        "orderers" : { "$ref" : "#/definitions/orderers" },
+        "organizations" : { "$ref" : "#/definitions/organizations" },
+        "peers" : { "$ref":  "#/definitions/peers" }
+    },
+    "required" : ["name", "x-type", "client", "certificateAuthorities", "channels", "orderers", "peers"] 
+
+}
